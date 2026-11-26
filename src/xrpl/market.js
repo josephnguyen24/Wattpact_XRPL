@@ -49,15 +49,35 @@ export async function lockPrime(client, operator, foyerAddress, primeXrp, condit
   return { ...out, sequence: out.result.tx_json.Sequence, cancelAfter };
 }
 
+/** Construit un EscrowCreate sans le soumettre (pour les envois groupés). */
+export function escrowCreateTx(operatorAddress, foyerAddress, primeXrp, condition) {
+  const cancelAfter = xrpl.isoTimeToRippleTime(new Date(Date.now() + CANCEL_AFTER_SECONDS * 1000).toISOString());
+  return {
+    cancelAfter,
+    tx: {
+      TransactionType: "EscrowCreate",
+      Account: operatorAddress,
+      Destination: foyerAddress,
+      Amount: xrpl.xrpToDrops(primeXrp),
+      Condition: condition,
+      CancelAfter: cancelAfter,
+    },
+  };
+}
+
 /** 4. Mesure : le vérificateur publie le hash du relevé (jamais la consommation). */
-export async function publishMeasureHash(client, verifier, operatorAddress, payload) {
-  return submit(client, verifier, {
+export function measureTx(verifierAddress, operatorAddress, payload) {
+  return {
     TransactionType: "Payment",
-    Account: verifier.address,
+    Account: verifierAddress,
     Destination: operatorAddress,
     Amount: ONE_DROP,
     Memos: [makeMemo("measure", payload)],
-  });
+  };
+}
+
+export async function publishMeasureHash(client, verifier, operatorAddress, payload) {
+  return submit(client, verifier, measureTx(verifier.address, operatorAddress, payload));
 }
 
 /** 5a. Libération : le vérificateur révèle la Fulfillment, la prime va au foyer. */

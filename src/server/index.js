@@ -1,16 +1,6 @@
-/**
- * API + interface WattPact. Lancer : npm start  ->  http://localhost:3000
- *
- *   GET  /api/accounts                 adresses publiques et soldes des 5 comptes de test
- *   GET  /api/offers                   offres et statut de chaque escrow
- *   POST /api/offers                   { slot, targetReduction, primeXrp }  publie une offre
- *   POST /api/offers/:hash/accept      { foyer }  acceptation signée + prime verrouillée
- *   POST /api/offers/:hash/measure     { reductions: { foyer1: 0.25, ... } }  mesure + libérations
- *   POST /api/offers/:hash/settle      rembourse les primes manquées après CancelAfter
- *
- * Écoute sur 127.0.0.1 par défaut : l'API signe avec les seeds de test, elle ne doit pas être
- * exposée sur le Wi-Fi de l'école (HOST=0.0.0.0 en Codespaces, où le port reste privé).
- */
+// API + interface. npm start -> http://localhost:3000
+// Écoute sur 127.0.0.1 : le serveur signe avec les seeds de test, pas question de l'ouvrir
+// sur le Wi-Fi de l'école. En Codespaces, 0.0.0.0 (le port reste privé par défaut).
 import express from "express";
 import { fileURLToPath } from "node:url";
 import * as svc from "./service.js";
@@ -18,6 +8,8 @@ import * as svc from "./service.js";
 const app = express();
 app.use(express.json({ limit: "10kb" }));
 app.use(express.static(fileURLToPath(new URL("../../public", import.meta.url))));
+// xrpl.js pour le navigateur : la vue foyer lit le ledger sans passer par notre API
+app.use("/vendor", express.static(fileURLToPath(new URL("../../node_modules/xrpl/build", import.meta.url))));
 
 const wrap = (fn) => async (req, res) => {
   try {
@@ -31,10 +23,11 @@ const wrap = (fn) => async (req, res) => {
 
 app.get("/api/accounts", wrap(() => svc.accounts()));
 app.get("/api/offers", wrap(() => svc.listOffers()));
-app.post("/api/offers", wrap((req) => svc.createOffer(req.body)));
-app.post("/api/offers/:hash/accept", wrap((req) => svc.acceptAndLock(req.params.hash, req.body?.foyer)));
-app.post("/api/offers/:hash/measure", wrap((req) => svc.measureAndRelease(req.params.hash, req.body?.reductions)));
-app.post("/api/offers/:hash/settle", wrap((req) => svc.settleOffer(req.params.hash)));
+app.post("/api/offers", wrap((req) => svc.createOffer(req.body)));                                  // opérateur
+app.post("/api/offers/:hash/lock", wrap((req) => svc.lockAccepted(req.params.hash)));               // opérateur
+app.post("/api/offers/:hash/settle", wrap((req) => svc.settleOffer(req.params.hash)));             // opérateur
+app.post("/api/offers/:hash/accept", wrap((req) => svc.accept(req.params.hash, [].concat(req.body?.foyer ?? [])))); // foyer(s)
+app.post("/api/offers/:hash/measure", wrap((req) => svc.measure(req.params.hash, req.body?.reductions)));         // vérificateur
 app.post("/api/reset", wrap(() => (svc.resetLocal(), { ok: true })));
 
 const PORT = Number(process.env.PORT || 3000);

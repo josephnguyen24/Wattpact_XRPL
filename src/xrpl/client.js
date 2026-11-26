@@ -44,6 +44,27 @@ export async function submit(client, wallet, tx) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
+ * Plusieurs transactions d'un même compte en une fois : on fixe les Sequence nous-mêmes,
+ * on soumet tout, puis on attend les validations en parallèle (~1 ledger au lieu de n).
+ */
+export async function submitBatch(client, wallet, txs) {
+  if (!txs.length) return [];
+  const info = await client.request({ command: "account_info", account: wallet.address, ledger_index: "current" });
+  const first = info.result.account_data.Sequence;
+  const prepared = await Promise.all(txs.map((tx, i) => client.autofill({ ...tx, Sequence: first + i })));
+  const signed = prepared.map((tx) => ({ tx, ...wallet.sign(tx) }));
+  return Promise.all(
+    signed.map(async (s, i) => {
+      await sleep(i * 60); // garde l'ordre d'arrivée des Sequence
+      const res = await client.submitAndWait(s.tx_blob);
+      const code = res.result.meta?.TransactionResult;
+      if (code !== "tesSUCCESS") throw new Error(`${s.tx.TransactionType} refusée : ${code} (${s.hash})`);
+      return { hash: s.hash, result: res.result, sequence: s.tx.Sequence };
+    }),
+  );
+}
+
+/**
  * Faucet avec nouvelles tentatives (toute la promo l'appelle en même temps).
  * Sans `wallet` : crée un compte. Avec `wallet` : ré-alimente ce compte (Testnet réinitialisé).
  */
