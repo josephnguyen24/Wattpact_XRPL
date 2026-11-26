@@ -1,0 +1,22 @@
+{
+  "name": "wattpact",
+  "version": "0.1.0",
+  "description": "WattPact : marché de l'effacement de consommation sur le XRP Ledger (Testnet)",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "check": "node src/scripts/check-testnet.js",
+    "setup:wallets": "node src/scripts/setup-wallets.js",
+    "demo": "node src/scripts/demo.js",
+    "demo:success": "node src/scripts/demo.js --outcome success",
+    "demo:fail": "node src/scripts/demo.js --outcome fail",
+    "demo:mixed": "node src/scripts/demo.js --outcome mixed",
+    "settle": "node src/scripts/settle.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "xrpl": "^4.0.0"
+  }
+}
