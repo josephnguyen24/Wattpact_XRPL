@@ -45,7 +45,17 @@ npm run setup:wallets    # crée et alimente les 5 comptes de test, écrit .env
 npm test                 # tests unitaires (hors réseau)
 ```
 
-Option sans installation : GitHub Codespaces (voir la fiche d'accès Testnet du challenge).
+### GitHub Codespaces (recommandé pour l'équipe)
+
+Aucune installation, et le réseau de l'école n'est pas concerné (le Codespace tourne dans le cloud).
+
+1. Sur la page du dépôt : **Code > Codespaces > Create codespace on main**.
+2. Attendre la fin du démarrage : `.devcontainer/` installe les dépendances, lance les tests et crée vos 5 comptes Testnet.
+3. Vérifier : `npm run check`, puis `npm run demo:mixed`.
+
+Chaque membre a **son propre Codespace et ses propres comptes de test** : rien à partager, aucune seed ne circule. Si le faucet est saturé au démarrage, relancer `npm run setup:wallets`. Les ports 3000 (API) et 5173 (interface) sont redirigés automatiquement.
+
+Pensez à **arrêter ou supprimer** votre Codespace quand vous avez fini (quota gratuit limité) : un Codespace inactif s'arrête seul après 30 min.
 
 ### Comptes de test
 

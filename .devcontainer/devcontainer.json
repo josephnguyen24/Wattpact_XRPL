@@ -1,0 +1,28 @@
+{
+  "name": "WattPact (XRPL Testnet)",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "forwardPorts": [3000, 5173],
+  "portsAttributes": {
+    "3000": { "label": "API WattPact", "onAutoForward": "notify" },
+    "5173": { "label": "Interface (Vite)", "onAutoForward": "openBrowser" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "GitHub.vscode-pull-request-github",
+        "eamodio.gitlens"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "files.eol": "\n",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+  "remoteEnv": {
+    "XRPL_SERVERS": "wss://s.altnet.rippletest.net:51233,wss://testnet.xrpl-labs.com,wss://testnet.honeycluster.io"
+  }
+}
