@@ -117,7 +117,8 @@ function viewOperator() {
   const d = cfg.defaults;
   const list = offers.map((o) => {
     const accepted = FOYERS.filter((f) => o.foyers[f].status === "accepted");
-    const missed = FOYERS.filter((f) => o.foyers[f].status === "locked" && o.foyers[f].verdict === "missed");
+    // récupérable : objectif manqué, ou échéance passée sans mesure (le ledger n'autorise plus que le remboursement)
+    const missed = FOYERS.filter((f) => o.foyers[f].status === "locked" && (o.foyers[f].verdict === "missed" || o.foyers[f].cancellable));
     const locked = FOYERS.filter((f) => ["locked", "released", "refunded"].includes(o.foyers[f].status)).length;
     let foot = "";
     if (accepted.length) {
@@ -171,8 +172,13 @@ function viewVerifier() {
     if (o.status === "open") {
       if (!locked.length) return `<article class="offer">${offerTop(o)}<div class="offer-foot muted small">En attente des escrows de l'opérateur.</div></article>`;
       const s = (sliders[o.hash] ||= { foyer1: 25, foyer2: 30, foyer3: 5 });
+      const deadline = Math.min(...locked.map((f) => o.foyers[f].escrow.cancelAfter));
+      if (locked.some((f) => o.foyers[f].cancellable)) {
+        return `<article class="offer">${offerTop(o)}<div class="offer-foot small ko">Échéance passée à ${hhmm(rippleDate(deadline))} sans mesure : le ledger n'autorise plus le paiement, seulement le remboursement de l'opérateur.</div></article>`;
+      }
       return `<article class="offer">${offerTop(o)}
-        <div class="offer-foot muted small">Relevés simulés : baisse réelle de chaque foyer sur le créneau.</div>
+        <div class="offer-foot small"><span class="muted">Relevés simulés : baisse réelle de chaque foyer sur le créneau.</span>
+          <span class="deadline">à publier avant ${hhmm(rippleDate(deadline))} · <span data-deadline="${deadline}"></span></span></div>
         <div class="sliders">${locked.map((f) => `<label>${NAME[f]} <output id="out-${o.hash}-${f}">−${s[f]} %</output>
           <input type="range" min="0" max="50" value="${s[f]}" style="--v:${s[f] * 2}%" data-slider="${f}" data-hash="${o.hash}">
           <span class="target"><span>0 %</span><span>objectif −${pct(o.targetReduction)}</span><span>−50 %</span></span></label>`).join("")}</div>
@@ -303,6 +309,11 @@ function stats() {
 }
 
 function tick() {
+  document.querySelectorAll("[data-deadline]").forEach((el) => {
+    const left = Math.round(Number(el.dataset.deadline) + RIPPLE_EPOCH - Date.now() / 1000) - 15;
+    el.textContent = left > 0 ? `reste ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : "trop tard";
+    el.parentElement.classList.toggle("ko", left <= 30);
+  });
   document.querySelectorAll("[data-cancel-after]").forEach((el) => {
     const left = Math.round(Number(el.dataset.cancelAfter) + RIPPLE_EPOCH - Date.now() / 1000);
     el.textContent = left > 0 ? `possible dans ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : "échéance passée";

@@ -53,6 +53,11 @@ function findOffer(hash) {
   return o;
 }
 
+async function ledgerTime(c) {
+  const r = await c.request({ command: "ledger", ledger_index: "validated" });
+  return r.result.ledger.close_time;
+}
+
 const foyersWith = (o, status) => FOYERS.filter((f) => o.foyers[f].status === status);
 
 // ---------- lecture ----------
@@ -137,16 +142,17 @@ export const lockAccepted = (hash) =>
     return o;
   });
 
-/** Primes manquées rendues à l'opérateur, une fois CancelAfter passé. */
+/**
+ * Après CancelAfter, toute prime encore bloquée revient à l'opérateur : objectif manqué,
+ * mais aussi vérificateur qui n'a jamais mesuré (le ledger interdit alors EscrowFinish).
+ */
 export const settleOffer = (hash) =>
   serial(async () => {
     const o = findOffer(hash);
     const c = await getClient();
-    const r = await c.request({ command: "ledger", ledger_index: "validated" });
-    const now = r.result.ledger.close_time;
-    const missed = foyersWith(o, "locked").filter((f) => o.foyers[f].verdict === "missed");
-    const ready = missed.filter((f) => now > o.foyers[f].escrow.cancelAfter);
-    if (!ready.length) throw new HttpError(409, "CancelAfter pas encore passé sur le ledger, réessayer dans quelques secondes");
+    const now = await ledgerTime(c);
+    const ready = foyersWith(o, "locked").filter((f) => now > o.foyers[f].escrow.cancelAfter);
+    if (!ready.length) throw new HttpError(409, "Échéance pas encore passée sur le ledger, réessayer dans quelques secondes");
 
     const operator = walletFor("operator");
     const results = await submitBatch(
@@ -155,7 +161,7 @@ export const settleOffer = (hash) =>
       ready.map((f) => ({ TransactionType: "EscrowCancel", Account: operator.address, Owner: operator.address, OfferSequence: o.foyers[f].escrow.sequence })),
     );
     ready.forEach((f, i) => Object.assign(o.foyers[f], { status: "refunded", settleHash: results[i].hash }));
-    if (!foyersWith(o, "locked").length) o.status = "closed";
+    if (!foyersWith(o, "locked").length && !foyersWith(o, "accepted").length) o.status = "closed";
     save();
     return o;
   });
@@ -192,24 +198,30 @@ export const measure = (hash, reductions = {}) =>
     if (foyersWith(o, "accepted").length) throw new HttpError(409, "Des acceptations attendent encore leur escrow");
 
     const c = await getClient();
+    // Après CancelAfter, XRPL refuse EscrowFinish (tecNO_PERMISSION) : on vérifie avant d'envoyer quoi que ce soit.
+    // Marge de 15 s : le temps que les transactions soient validées.
+    const deadline = Math.min(...locked.map((f) => o.foyers[f].escrow.cancelAfter));
+    if ((await ledgerTime(c)) + 15 > deadline) {
+      throw new HttpError(409, "Trop tard : l'échéance des escrows est passée, la prime ne peut plus être versée. L'opérateur peut la récupérer.");
+    }
+
     const operator = walletFor("operator");
     const verifier = walletFor("verifier");
-    const measures = locked.map((f) => {
+    // Calculé à part : rien n'est écrit dans l'état tant que le ledger n'a pas validé
+    const results = Object.fromEntries(locked.map((f) => {
       const r = Math.min(Math.max(Number(reductions[f] ?? 0), 0), 0.9);
       const history = generateHistory(f);
       const { baselineKwh } = computeBaseline(history);
       const measuredKwh = measureEvent(history, r, { foyerId: f });
       const v = evaluate({ baselineKwh, measuredKwh, targetReduction: o.targetReduction });
       const rh = releveHash({ offerHash: o.hash, foyer: o.foyers[f].address, slot: o.slot, measuredKwh });
-      Object.assign(o.foyers[f], {
-        baselineKwh, measuredKwh, reduction: v.reduction, releveHash: rh, verdict: v.reached ? "reached" : "missed",
-      });
-      return { foyer: o.foyers[f].address, releveHash: rh };
-    });
+      return [f, { baselineKwh, measuredKwh, reduction: v.reduction, releveHash: rh, verdict: v.reached ? "reached" : "missed" }];
+    }));
+    const measures = locked.map((f) => ({ foyer: o.foyers[f].address, releveHash: results[f].releveHash }));
     // Un seul envoi : relevés d'abord (Sequence n), libérations ensuite (n+1...).
     // Le ledger applique les Sequence dans l'ordre : les empreintes ne peuvent pas arriver après le verdict.
-    const winners = locked.filter((f) => o.foyers[f].verdict === "reached");
-    const [m, ...results] = await submitBatch(c, verifier, [
+    const winners = locked.filter((f) => results[f].verdict === "reached");
+    const [m, ...released] = await submitBatch(c, verifier, [
       measureTx(verifier.address, operator.address, { offerHash: o.hash, measures }),
       ...winners.map((f) => {
         const e = o.foyers[f].escrow;
@@ -225,7 +237,8 @@ export const measure = (hash, reductions = {}) =>
     ]);
     o.measureHash = m.hash;
     o.status = "measured";
-    winners.forEach((f, i) => Object.assign(o.foyers[f], { status: "released", settleHash: results[i].hash }));
+    locked.forEach((f) => Object.assign(o.foyers[f], results[f]));
+    winners.forEach((f, i) => Object.assign(o.foyers[f], { status: "released", settleHash: released[i].hash }));
     if (!foyersWith(o, "locked").length) o.status = "closed";
     save();
     return o;

@@ -191,6 +191,7 @@ input[type="range"]::-moz-range-thumb {
   width: 16px; height: 16px; border-radius: 50%; cursor: grab;
   background: var(--ink); border: 3px solid var(--volt); box-shadow: 0 0 16px var(--volt);
 }
+.deadline { margin-left: auto; font: 500 12px var(--mono); color: var(--text); }
 .target { font: 11px var(--mono); color: var(--muted); display: flex; justify-content: space-between; }
 
 .me { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
