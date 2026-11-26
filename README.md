@@ -37,8 +37,8 @@ La référence est la moyenne du même créneau sur les 5 derniers jours compara
 Prérequis : Node.js LTS (>= 20), npm, Git. Aucune clé ni inscription : le XRP de test vient d'un faucet.
 
 ```bash
-git clone <url-du-depot>
-cd wattpact
+git clone https://github.com/josephnguyen24/Wattpact_XRPL.git
+cd Wattpact_XRPL
 npm install
 npm run check            # vérifie l'accès au Testnet (serveurs de secours inclus)
 npm run setup:wallets    # crée et alimente les 5 comptes de test, écrit .env
