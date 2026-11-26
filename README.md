@@ -59,9 +59,33 @@ Pensez à **arrêter ou supprimer** votre Codespace quand vous avez fini (quota 
 
 ### Comptes de test
 
-`npm run setup:wallets` crée 5 comptes via le faucet et écrit leurs seeds dans `.env` (non versionné) ; il affiche les **adresses publiques** et un lien vers l'explorateur. Les adresses ne sont pas figées dans ce dépôt : le Testnet peut être réinitialisé. Si un compte a disparu, supprimer `.env` et relancer `npm run setup:wallets`.
+`npm run setup:wallets` crée 5 comptes via le faucet et écrit leurs seeds dans `.env` (non versionné) ; il affiche les **adresses publiques** et un lien vers l'explorateur. Les adresses ne sont pas figées dans ce dépôt : le Testnet peut être réinitialisé. Si un compte a disparu, relancer `npm run setup:wallets` : les comptes manquants sont ré-alimentés avec les mêmes seeds (mêmes adresses), sans toucher à `.env`. Si le faucet est saturé, le script réessaie automatiquement.
 
-## Lancer la démonstration
+## Interface web
+
+```bash
+npm start              # http://localhost:3000
+```
+
+Parcours de démo, entièrement dans le navigateur :
+
+1. **Opérateur** : publier l'offre (créneau, objectif, prime).
+2. **Foyers** : cliquer « Accepter » pour chaque foyer ; l'acceptation est signée par le foyer, puis la prime est verrouillée en escrow.
+3. **Vérificateur** : régler la réduction réelle de chaque foyer (par défaut : 2 réussites, 1 échec), puis « Publier les relevés et régler » : les empreintes partent on-chain, les primes gagnées sont libérées.
+4. **Remboursement** : après le compte à rebours `CancelAfter`, « Rembourser l'opérateur ».
+
+Chaque transaction a son lien vers testnet.xrpl.org. L'API (`src/server/`) écoute sur `127.0.0.1` : elle signe avec les seeds de test et ne doit pas être exposée sur le réseau de l'école. L'état local (hashs, séquences d'escrow) est dans `data/app-state.json`, ignoré par Git ; aucune seed ni valeur secrète n'y est écrite.
+
+| Méthode | Route | Effet on-chain |
+|---|---|---|
+| GET | `/api/accounts` | Adresses publiques et soldes |
+| GET | `/api/offers` | Offres et statut de chaque escrow |
+| POST | `/api/offers` | `Payment` + Memo (offre) |
+| POST | `/api/offers/:hash/accept` | `Payment` + Memo signé par le foyer, puis `EscrowCreate` |
+| POST | `/api/offers/:hash/measure` | `Payment` + Memo (empreintes), puis `EscrowFinish` si objectif atteint |
+| POST | `/api/offers/:hash/settle` | `EscrowCancel` après `CancelAfter` |
+
+## Lancer la démonstration en ligne de commande
 
 ```bash
 npm run demo:success   # les 3 foyers atteignent l'objectif : 3 primes libérées
@@ -69,7 +93,15 @@ npm run demo:mixed     # 2 foyers réussissent, 1 échoue : 2 libérées, 1 verr
 npm run demo:fail      # aucun foyer n'atteint l'objectif
 npm run settle         # rembourse à l'opérateur les primes manquées, une fois CancelAfter passé
 npm run settle -- --wait   # idem, en attendant CancelAfter
+npm run anti-triche    # tentatives de fraude soumises au Testnet : toutes refusées par le ledger
 ```
+
+| Tentative (`npm run anti-triche`) | Résultat on-chain |
+|---|---|
+| Le foyer se paie avec une fausse valeur secrète | `tecCRYPTOCONDITION_ERROR` |
+| Le foyer se paie sans valeur secrète | `tecCRYPTOCONDITION_ERROR` |
+| L'opérateur reprend la prime avant `CancelAfter` | `tecNO_PERMISSION` |
+| Le vérificateur libère avec la bonne valeur | Prime versée au **foyer** (destination figée), rien au vérificateur |
 
 Chaque étape affiche le lien de la transaction sur [testnet.xrpl.org](https://testnet.xrpl.org). La durée avant `CancelAfter` se règle avec `CANCEL_AFTER_SECONDS` dans `.env` (180 s par défaut).
 
@@ -89,7 +121,9 @@ src/
     simulator.js       compteurs simulés, déterministes (graine fixe)
     verifier.js        référence, verdict, empreinte du relevé
     state.js           état local de la démo (data/state.json, ignoré par Git)
-  scripts/             check-testnet, setup-wallets, demo, settle
+  server/              API Express (index.js) et service métier (service.js)
+  scripts/             check-testnet, setup-wallets, demo, settle, anti-triche
+public/                interface web (HTML, CSS, JS sans build)
 test/                  tests unitaires (node:test)
 docs/                  architecture, backlog
 ```

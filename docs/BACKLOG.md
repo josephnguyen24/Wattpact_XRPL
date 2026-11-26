@@ -16,10 +16,11 @@
 - [ ] Lire l'historique on-chain depuis le ledger plutôt que depuis l'état local
 
 ## Alexis Gauthron : architecture et sécurité
-- [ ] Revue sécurité : aucune seed dans Git (vérifier l'historique), `.env` ignoré
-- [ ] Tests des scénarios (réussite, échec, mixte) et des cas limites
-- [ ] Vérifier que le README est reproductible depuis un clone vierge (et en Codespaces)
-- [ ] Protocole de reprise si le Testnet est réinitialisé
+- [x] Revue sécurité : aucune seed dans Git (historique vérifié), `.env` ignoré
+- [x] Cas limites on-chain : `npm run anti-triche` (fausse Fulfillment, EscrowCancel trop tôt, destination figée)
+- [ ] Tests des scénarios success / fail (mixed validé)
+- [x] README reproductible depuis un clone vierge (local Windows) ; [ ] à vérifier en Codespaces
+- [x] Protocole de reprise : `setup:wallets` ré-alimente les comptes disparus ; faucet avec nouvelles tentatives ; timeout de connexion 8 s
 - [ ] Section « limites anticipées » pour la soutenance
 
 ## Quentin Robalo : front-end et UX
