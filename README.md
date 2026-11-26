@@ -1,156 +1,90 @@
 # WattPact
 
-**Marché de l'effacement de consommation sur le XRP Ledger (Testnet).**
-Le réseau publie une offre, le foyer l'accepte, et la prime pour les kWh effacés se règle par escrow conditionnel : la prime est verrouillée avant l'effort, personne ne peut revenir sur sa promesse.
+Marché de l'effacement de consommation sur le XRP Ledger (Testnet). Projet du Blockchain Challenge XRPL, ING5 ECE Paris, sujet Énergie.
 
-Projet du Blockchain Challenge XRPL (ING5, ECE Paris), sujet Énergie. Réseau : **XRPL Testnet**, sans smart contract ni EVM Sidechain. Aucune donnée personnelle on-chain.
+Aux heures de pointe (18h-20h l'hiver), on paie les foyers qui baissent leur consommation. Ça existe déjà, mais le foyer doit croire l'opérateur sur parole. Dans WattPact, la prime est bloquée dans un escrow **avant** l'effort : l'opérateur ne peut plus la reprendre, le vérificateur peut la débloquer mais elle ne peut aller qu'au foyer.
 
-## Le problème
+Trois acteurs, cinq comptes de test : un opérateur (paie), un vérificateur (mesure et tranche), trois foyers.
 
-Aux heures de pointe, le réseau est sous tension. Rémunérer les foyers qui baissent leur consommation existe déjà, mais le foyer doit croire l'opérateur sur parole. Ici, celui qui paie n'est pas celui qui juge, et celui qui juge ne peut pas toucher l'argent.
+## Ce qui se passe sur le ledger
 
-| Acteur | Rôle | Compte de test |
-|---|---|---|
-| Opérateur de flexibilité | Publie l'offre, finance la prime | `operator` |
-| Vérificateur (gestionnaire de comptage) | Mesure, calcule la référence, valide l'objectif | `verifier` |
-| Foyers | Acceptent l'offre, réduisent leur consommation | `foyer1`, `foyer2`, `foyer3` |
+1. **Offre** : `Payment` + Memo de l'opérateur (créneau, objectif -20 %, prime 5 XRP). Son hash sert d'identifiant.
+2. **Acceptation** : `Payment` + Memo signé par le foyer, qui référence le hash de l'offre.
+3. **Prime bloquée** : `EscrowCreate` vers le foyer, avec une `Condition` (hash d'une valeur secrète du vérificateur) et un `CancelAfter`.
+4. **Mesure** : `Payment` + Memo du vérificateur avec l'empreinte SHA-256 de chaque relevé. La consommation reste hors chaîne.
+5. **Objectif atteint** : `EscrowFinish` avec la valeur secrète, la prime part au foyer.
+6. **Objectif manqué** : `EscrowCancel` après `CancelAfter`, la prime revient à l'opérateur.
 
-## Scénario
-
-```
-Offre -> Acceptation -> Verrouillage (escrow) -> Mesure -> Libération  ou  Remboursement
-```
-
-| Étape | Transaction XRPL | Ce qui est on-chain |
-|---|---|---|
-| Offre | `Payment` + Memo | Créneau, objectif (-20 %), prime (5 XRP) |
-| Acceptation | `Payment` + Memo | Hash de l'offre acceptée, signé par le foyer |
-| Verrouillage | `EscrowCreate` (Condition, CancelAfter) | Montant, foyer destinataire, condition |
-| Mesure | `Payment` + Memo | Hash du relevé, jamais la consommation |
-| Libération | `EscrowFinish` (Fulfillment) | Valeur secrète révélée si consommation <= 80 % de la référence |
-| Remboursement | `EscrowCancel` | Retour de la prime à l'opérateur, après CancelAfter |
-
-La référence est la moyenne du même créneau sur les 5 derniers jours comparables (jours de semaine). L'objectif est atteint si la consommation mesurée est au plus 80 % de la référence.
+Référence = moyenne du même créneau sur les 5 derniers jours de semaine. Objectif atteint si conso <= 80 % de la référence.
 
 ## Installation
 
-Prérequis : Node.js LTS (>= 20), npm, Git. Aucune clé ni inscription : le XRP de test vient d'un faucet.
+Node.js 20+.
 
 ```bash
 git clone https://github.com/josephnguyen24/Wattpact_XRPL.git
 cd Wattpact_XRPL
 npm install
-npm run check            # vérifie l'accès au Testnet (serveurs de secours inclus)
-npm run setup:wallets    # crée et alimente les 5 comptes de test, écrit .env
-npm test                 # tests unitaires (hors réseau)
+npm run setup:wallets   # crée les 5 comptes via le faucet, seeds dans .env
+npm start               # http://localhost:3000
 ```
 
-### GitHub Codespaces (recommandé pour l'équipe)
+En Codespaces : Code > Codespaces > Create codespace, tout s'installe tout seul.
 
-Aucune installation, et le réseau de l'école n'est pas concerné (le Codespace tourne dans le cloud).
+Si le Testnet a été réinitialisé, relancer `npm run setup:wallets` : les comptes sont ré-alimentés avec les mêmes adresses. Si le Wi-Fi bloque le port 51233, on bascule sur un serveur en port 443 (voir `XRPL_SERVERS` dans `.env.example`).
 
-1. Sur la page du dépôt : **Code > Codespaces > Create codespace on main**.
-2. Attendre la fin du démarrage : `.devcontainer/` installe les dépendances, lance les tests et crée vos 5 comptes Testnet.
-3. Vérifier : `npm run check`, puis `npm run demo:mixed`.
+## Démo
 
-Chaque membre a **son propre Codespace et ses propres comptes de test** : rien à partager, aucune seed ne circule. Si le faucet est saturé au démarrage, relancer `npm run setup:wallets`. Les ports 3000 (API) et 5173 (interface) sont redirigés automatiquement.
+Ouvrir deux onglets : `#operateur` et `#foyer1`, par exemple.
 
-Pensez à **arrêter ou supprimer** votre Codespace quand vous avez fini (quota gratuit limité) : un Codespace inactif s'arrête seul après 30 min.
+1. Opérateur : publier l'offre.
+2. Foyers : accepter (ou le lien « faire accepter les 3 foyers » pour aller vite).
+3. Opérateur : bloquer les primes.
+4. Foyer : « Vérifier sur le ledger ». Le navigateur relit l'offre, l'acceptation et l'escrow directement sur le Testnet, sans passer par notre serveur.
+5. Vérificateur : régler les baisses (par défaut 2 réussites, 1 échec), publier les relevés.
+6. Opérateur : récupérer la prime non gagnée une fois l'échéance passée.
 
-### Comptes de test
+Chaque transaction a son lien vers testnet.xrpl.org. Pour une démo courte : `CANCEL_AFTER_SECONDS=60` dans `.env`.
 
-`npm run setup:wallets` crée 5 comptes via le faucet et écrit leurs seeds dans `.env` (non versionné) ; il affiche les **adresses publiques** et un lien vers l'explorateur. Les adresses ne sont pas figées dans ce dépôt : le Testnet peut être réinitialisé. Si un compte a disparu, relancer `npm run setup:wallets` : les comptes manquants sont ré-alimentés avec les mêmes seeds (mêmes adresses), sans toucher à `.env`. Si le faucet est saturé, le script réessaie automatiquement.
-
-## Interface web
+Autres scripts :
 
 ```bash
-npm start              # http://localhost:3000
+npm run demo:mixed      # le même scénario en ligne de commande (aussi demo:success, demo:fail)
+npm run settle          # remboursement des primes manquées
+npm run anti-triche     # essaie de tricher, le ledger refuse
+npm test
 ```
 
-Parcours de démo, entièrement dans le navigateur :
+`anti-triche` envoie de vraies transactions frauduleuses : le foyer qui se paie avec une fausse valeur secrète ou sans valeur (`tecCRYPTOCONDITION_ERROR`), l'opérateur qui reprend la prime avant l'échéance (`tecNO_PERMISSION`). Puis la vraie libération, qui paie le foyer et pas le vérificateur.
 
-1. **Opérateur** : publier l'offre (créneau, objectif, prime).
-2. **Foyers** : cliquer « Accepter » pour chaque foyer ; l'acceptation est signée par le foyer, puis la prime est verrouillée en escrow.
-3. **Vérificateur** : régler la réduction réelle de chaque foyer (par défaut : 2 réussites, 1 échec), puis « Publier les relevés et régler » : les empreintes partent on-chain, les primes gagnées sont libérées.
-4. **Remboursement** : après le compte à rebours `CancelAfter`, « Rembourser l'opérateur ».
+## Code
 
-Chaque transaction a son lien vers testnet.xrpl.org. L'API (`src/server/`) écoute sur `127.0.0.1` : elle signe avec les seeds de test et ne doit pas être exposée sur le réseau de l'école. L'état local (hashs, séquences d'escrow) est dans `data/app-state.json`, ignoré par Git ; aucune seed ni valeur secrète n'y est écrite.
-
-| Méthode | Route | Effet on-chain |
-|---|---|---|
-| GET | `/api/accounts` | Adresses publiques et soldes |
-| GET | `/api/offers` | Offres et statut de chaque escrow |
-| POST | `/api/offers` | `Payment` + Memo (offre) |
-| POST | `/api/offers/:hash/accept` | `Payment` + Memo signé par le foyer, puis `EscrowCreate` |
-| POST | `/api/offers/:hash/measure` | `Payment` + Memo (empreintes), puis `EscrowFinish` si objectif atteint |
-| POST | `/api/offers/:hash/settle` | `EscrowCancel` après `CancelAfter` |
-
-## Lancer la démonstration en ligne de commande
-
-```bash
-npm run demo:success   # les 3 foyers atteignent l'objectif : 3 primes libérées
-npm run demo:mixed     # 2 foyers réussissent, 1 échoue : 2 libérées, 1 verrouillée
-npm run demo:fail      # aucun foyer n'atteint l'objectif
-npm run settle         # rembourse à l'opérateur les primes manquées, une fois CancelAfter passé
-npm run settle -- --wait   # idem, en attendant CancelAfter
-npm run anti-triche    # tentatives de fraude soumises au Testnet : toutes refusées par le ledger
-```
-
-| Tentative (`npm run anti-triche`) | Résultat on-chain |
-|---|---|
-| Le foyer se paie avec une fausse valeur secrète | `tecCRYPTOCONDITION_ERROR` |
-| Le foyer se paie sans valeur secrète | `tecCRYPTOCONDITION_ERROR` |
-| L'opérateur reprend la prime avant `CancelAfter` | `tecNO_PERMISSION` |
-| Le vérificateur libère avec la bonne valeur | Prime versée au **foyer** (destination figée), rien au vérificateur |
-
-Chaque étape affiche le lien de la transaction sur [testnet.xrpl.org](https://testnet.xrpl.org). La durée avant `CancelAfter` se règle avec `CANCEL_AFTER_SECONDS` dans `.env` (180 s par défaut).
-
-**Pour la soutenance** : lancer le scénario d'échec quelques minutes avant le passage, puis `npm run settle` pour montrer la prime déjà remboursée dans l'explorateur ; jouer le scénario de réussite en direct.
-
-## Structure
-
-```
-src/
-  config.js            paramètres, rôles, liens explorateur
-  xrpl/                couche blockchain (xrpl.js)
-    client.js          connexion avec serveurs de secours, soumission + vérification tesSUCCESS
-    conditions.js      crypto-condition PREIMAGE-SHA-256 (sans dépendance externe)
-    market.js          offre, acceptation, escrow, mesure, libération, remboursement
-    memo.js            encodage / décodage des Memos
-  offchain/            logique hors chaîne
-    simulator.js       compteurs simulés, déterministes (graine fixe)
-    verifier.js        référence, verdict, empreinte du relevé
-    state.js           état local de la démo (data/state.json, ignoré par Git)
-  server/              API Express (index.js) et service métier (service.js)
-  scripts/             check-testnet, setup-wallets, demo, settle, anti-triche
-public/                interface web (HTML, CSS, JS sans build)
-test/                  tests unitaires (node:test)
-docs/                  architecture, backlog
-```
+- `src/xrpl/` : connexion (avec serveurs de secours), transactions, crypto-condition PREIMAGE-SHA-256 faite avec `node:crypto`
+- `src/offchain/` : simulateur de compteurs (déterministe), calcul de la référence, verdict
+- `src/server/` : API Express utilisée par l'interface
+- `public/` : interface, sans build
+- `src/scripts/` : setup, démo CLI, settle, anti-triche
 
 ## Sécurité
 
-- Comptes de test uniquement : **aucune seed Mainnet**, jamais.
-- Les seeds restent dans `.env` (dans `.gitignore`) et ne sont jamais affichées par les scripts.
-- Aucune donnée personnelle on-chain : seul le hash du relevé est publié. Les foyers sont des comptes fictifs.
-- La valeur secrète de chaque escrow est **dérivée** (HMAC-SHA256 du secret du vérificateur, de l'offre et du foyer) et n'est pas stockée : elle n'est révélée on-chain qu'à la libération.
+- Comptes de test uniquement. Les seeds sont dans `.env`, jamais commitées, jamais affichées.
+- La valeur secrète de chaque escrow est dérivée (HMAC du secret du vérificateur + offre + foyer) et jamais stockée. Elle n'apparaît on-chain qu'au moment de la libération.
+- Le serveur écoute sur `127.0.0.1` seulement : il signe avec les seeds, il ne doit pas être joignable depuis le Wi-Fi de l'école.
+- Rien de personnel on-chain : seulement des empreintes.
 
-## Limites assumées
+## Limites
 
-- **Mesure hors chaîne** : le vérificateur reste un point de confiance ; il publie le hash du relevé avant son verdict.
-- **Fraude à la référence** : limitée par une moyenne sur plusieurs jours.
-- **Échelle** : un escrow par foyer et par événement.
-- **Vie privée** : seul le hash du relevé est on-chain.
-- **Adoption** : wallets et réglementation freinent les particuliers ; cible réaliste : le règlement entre agrégateurs et fournisseurs.
-- Prime en XRP Testnet (l'escrow natif ne gère que le XRP).
+- La mesure reste hors chaîne : il faut faire confiance au vérificateur sur le relevé. Il publie l'empreinte avant de trancher, donc il ne peut pas changer le relevé après coup.
+- Un foyer peut gonfler sa conso les jours d'avant pour améliorer sa référence. La moyenne sur 5 jours limite l'effet sans le supprimer.
+- Un escrow par foyer et par événement : ça ne passe pas à des millions de foyers tel quel.
+- Les particuliers n'ont pas de wallet. Cible plus réaliste : le règlement entre agrégateurs et fournisseurs.
+- L'escrow natif ne gère que le XRP, d'où une prime en XRP.
 
 ## Équipe
 
-| Rôle | Membre |
-|---|---|
-| Cheffe de projet, lead blockchain | Alexia Kairouz |
-| Back-end et oracle de mesure | Minh-Duc Joseph Nguyen |
-| Architecture et sécurité | Alexis Gauthron |
-| Front-end et UX | Quentin Robalo |
+- Alexia Kairouz : cheffe de projet, blockchain
+- Minh-Duc Joseph Nguyen : back-end, mesure
+- Alexis Gauthron : architecture, sécurité
+- Quentin Robalo : front-end
 
-Voir [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) et [docs/BACKLOG.md](docs/BACKLOG.md).
+Détails : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/BACKLOG.md](docs/BACKLOG.md).
