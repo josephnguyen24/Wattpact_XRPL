@@ -5,61 +5,60 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>WattPact</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header class="top">
-  <div class="wrap top-in">
-    <div class="brand">
-      <svg viewBox="0 0 24 24" class="logo" aria-hidden="true"><rect x="4" y="10" width="16" height="12" rx="2.5" fill="currentColor"/><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2.2" fill="none"/><path d="M12.8 12.5 10 16.6h2.2l-1 3 3-4.2H12l.8-2.9Z" fill="#17181b"/></svg>
-      <div>
-        <h1>WattPact</h1>
-        <p class="tag">La prime est verrouillée avant l'effort.</p>
-      </div>
+<header class="band">
+  <div class="wrap nav">
+    <a class="brand" href="#operateur">
+      <svg viewBox="0 0 24 24" class="bolt" aria-hidden="true"><path d="M13.5 2 5 13.2h6l-1.5 8.8L19 10.6h-6.2L13.5 2Z"/></svg>
+      <span>WattPact</span>
+    </a>
+    <nav class="roles" id="roles">
+      <a href="#operateur">Opérateur</a>
+      <a href="#verificateur">Vérificateur</a>
+      <a href="#foyer1">Foyer 1</a>
+      <a href="#foyer2">Foyer 2</a>
+      <a href="#foyer3">Foyer 3</a>
+    </nav>
+    <div class="net" id="net"><span class="led"></span><span id="net-label">connexion…</span></div>
+  </div>
+
+  <div class="wrap hero">
+    <div class="hero-text">
+      <p class="kicker">XRPL Testnet · effacement de pointe</p>
+      <p class="claim">La prime est bloquée<br><em>avant</em> l'effort.</p>
     </div>
-    <div class="net" id="net"><span class="dot"></span><span id="net-label">Connexion au Testnet…</span></div>
+    <svg class="curve" viewBox="0 0 600 150" aria-hidden="true">
+      <defs>
+        <linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#c6ff3d" stop-opacity=".28"/>
+          <stop offset="1" stop-color="#c6ff3d" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <rect class="peak" x="420" y="0" width="70" height="150"/>
+      <text class="peak-label" x="455" y="16">18h-20h</text>
+      <path class="area" d="M0 120 C60 118 90 95 140 92 S220 105 270 100 S350 80 400 60 S440 18 455 20 S480 40 500 75 S560 110 600 112 L600 150 L0 150 Z"/>
+      <path id="load" class="line" d="M0 120 C60 118 90 95 140 92 S220 105 270 100 S350 80 400 60 S440 18 455 20 S480 40 500 75 S560 110 600 112"/>
+      <path class="line cut" d="M420 44 C435 52 445 56 455 58 S475 60 490 64"/>
+      <circle class="spark" r="4.5">
+        <animateMotion dur="7s" repeatCount="indefinite" rotate="auto"><mpath href="#load"/></animateMotion>
+      </circle>
+    </svg>
+    <dl class="stats">
+      <div><dt>sous séquestre</dt><dd id="st-locked">0</dd></div>
+      <div><dt>primes payées</dt><dd id="st-paid">0</dd></div>
+      <div><dt>remboursées</dt><dd id="st-refunded">0</dd></div>
+    </dl>
   </div>
 </header>
 
-<main class="wrap grid">
-  <aside class="side">
-    <section class="card">
-      <p class="eyebrow">Opérateur de flexibilité</p>
-      <h2>Publier une offre</h2>
-      <form id="offer-form">
-        <label>Créneau <input name="slot" required maxlength="60"></label>
-        <div class="row2">
-          <label>Objectif <span class="suffix"><input name="target" type="number" min="1" max="99" required>%</span></label>
-          <label>Prime <span class="suffix"><input name="prime" type="number" min="0.1" max="20" step="0.1" required>XRP</span></label>
-        </div>
-        <button class="btn primary" type="submit">Publier sur le ledger</button>
-      </form>
-      <p class="hint">Transaction <code>Payment</code> + Memo : l'offre est figée à la publication, son hash devient son identifiant.</p>
-    </section>
-
-    <section class="card">
-      <p class="eyebrow">Comptes de test</p>
-      <ul class="accounts" id="accounts"></ul>
-    </section>
-  </aside>
-
-  <section class="offers">
-    <div class="offers-head">
-      <h2>Offres</h2>
-      <div class="legend">
-        <span class="chip s-invited">Invité</span><span class="chip s-locked">Verrouillée</span><span class="chip s-released">Libérée</span><span class="chip s-refunded">Remboursée</span>
-      </div>
-    </div>
-    <div id="offers"></div>
-    <div class="empty" id="empty" hidden>
-      <p>Aucune offre pour l'instant.</p>
-      <p class="hint">Publiez une offre à gauche : elle apparaîtra ici avec chaque transaction vérifiable sur testnet.xrpl.org.</p>
-    </div>
-  </section>
-</main>
+<main class="wrap" id="view"></main>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="/vendor/xrpl-latest-min.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>
