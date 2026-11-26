@@ -127,13 +127,13 @@ function viewOperator() {
     } else if (missed.length) {
       const ca = Math.max(...missed.map((f) => o.foyers[f].escrow.cancelAfter));
       foot = `<button class="btn" data-act="settle" data-hash="${o.hash}" ${missed.every((f) => o.foyers[f].cancellable) ? "" : "disabled"}>Récupérer ${missed.length * Number(o.primeXrp)} XRP</button>
-        <span class="muted small" data-cancel-after="${ca}"></span>`;
+        ${ring(`<span class="muted small" data-cancel-after="${ca}"></span>`)}`;
     }
     return `<article class="offer">${offerTop(o, txLink(o.measureHash, "relevés"))}
       <table><thead><tr><th>Foyer</th><th>Statut</th><th>Transactions</th></tr></thead><tbody>
       ${FOYERS.map((f) => {
         const v = o.foyers[f];
-        return `<tr><td>${NAME[f]}<br>${accLink(v.address)}</td><td>${chip(v.status)}</td>
+        return `<tr data-key="${o.hash}:${f}" data-status="${v.status}"><td>${NAME[f]}<br>${accLink(v.address)}</td><td>${chip(v.status)}${pipe(v.status)}</td>
           <td class="links">${txLink(v.acceptHash, "acceptation")}${txLink(v.escrow?.createHash, "escrow")}${txLink(v.settleHash, v.status === "refunded" ? "remboursement" : "paiement")}</td></tr>`;
       }).join("")}</tbody></table>
       ${foot ? `<div class="offer-foot">${foot}</div>` : ""}
@@ -178,7 +178,7 @@ function viewVerifier() {
       }
       return `<article class="offer">${offerTop(o)}
         <div class="offer-foot small"><span class="muted">Relevés simulés : baisse réelle de chaque foyer sur le créneau.</span>
-          <span class="deadline">à publier avant ${hhmm(rippleDate(deadline))} · <span data-deadline="${deadline}"></span></span></div>
+          <span class="deadline">${ring(`<span>à publier avant ${hhmm(rippleDate(deadline))} · <span data-deadline="${deadline}"></span></span>`)}</span></div>
         <div class="sliders">${locked.map((f) => `<label>${NAME[f]} <output id="out-${o.hash}-${f}">−${s[f]} %</output>
           <input type="range" min="0" max="50" value="${s[f]}" style="--v:${s[f] * 2}%" data-slider="${f}" data-hash="${o.hash}">
           <span class="target"><span>0 %</span><span>objectif −${pct(o.targetReduction)}</span><span>−50 %</span></span></label>`).join("")}</div>
@@ -212,7 +212,7 @@ function viewFoyer(f) {
     if (v.status === "locked" && !v.verdict) info = `${o.primeXrp} XRP bloqués à ton nom.`;
     if (v.verdict) info = `Baisse mesurée : −${(v.reduction * 100).toFixed(1)} % (objectif −${pct(o.targetReduction)}).`;
     return `<article class="offer">${offerTop(o)}
-      <div class="offer-foot">${chip(v.status)}<span class="small">${info}</span></div>
+      <div class="offer-foot" data-key="${o.hash}:${f}" data-status="${v.status}">${chip(v.status)}<span class="small">${info}</span>${pipe(v.status)}</div>
       ${proofs[`${o.hash}:${f}`] || ""}
       <div class="offer-foot">${action}${txLink(v.acceptHash, "mon acceptation")}${txLink(v.settleHash, v.status === "refunded" ? "remboursement" : "paiement")}</div>
     </article>`;
@@ -290,43 +290,123 @@ async function verify(o, f) {
 
 // ---------- rendu et événements ----------
 
+// ---------- éléments animés ----------
+
+const motion = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/** Frise acceptée → bloquée → payée / remboursée ; l'étape en cours clignote. */
+function pipe(status) {
+  const order = ["accepted", "locked", "final"];
+  const at = status === "invited" ? -1 : status === "accepted" ? 0 : status === "locked" ? 1 : 2;
+  const end = status === "refunded" ? "red" : "green";
+  return `<span class="pipe ${end}" aria-hidden="true">${order.map((_, i) =>
+    `${i ? `<i class="seg ${i <= at ? "lit" : ""}"></i>` : ""}<i class="node ${i < at ? "lit" : i === at ? "lit now" : ""}"></i>`).join("")}</span>`;
+}
+
+/** Anneau de compte à rebours autour d'un texte. */
+const ring = (inner) =>
+  `<span class="ring-wrap"><svg class="ring" viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15"/><circle class="fg" cx="18" cy="18" r="15" pathLength="100"/></svg>${inner}</span>`;
+function setRing(el, left, total) {
+  const fg = el.closest(".ring-wrap")?.querySelector(".fg");
+  if (fg) fg.style.strokeDashoffset = String(100 - Math.max(0, Math.min(1, left / total)) * 100);
+}
+
+// statuts déjà vus : une ligne qui change de statut clignote
+const seen = new Map();
+let enter = true;
+
 function render() {
   if (!cfg) return;
   const r = role();
   document.querySelectorAll("#roles a").forEach((a) => a.classList.toggle("on", a.getAttribute("href") === `#${r}`));
-  $("#view").innerHTML = r === "verificateur" ? viewVerifier() : FOYERS.includes(r) ? viewFoyer(r) : viewOperator();
+  const view = $("#view");
+  view.innerHTML = r === "verificateur" ? viewVerifier() : FOYERS.includes(r) ? viewFoyer(r) : viewOperator();
+  if (enter && motion) {
+    view.querySelectorAll(".offer, .card, .empty").forEach((el, i) => {
+      el.classList.add("enter");
+      el.style.animationDelay = `${i * 70}ms`;
+    });
+  }
+  enter = false;
+  view.querySelectorAll("[data-key]").forEach((el) => {
+    const prev = seen.get(el.dataset.key);
+    if (prev && prev !== el.dataset.status && motion) el.classList.add("flash", `flash-${el.dataset.status}`);
+    seen.set(el.dataset.key, el.dataset.status);
+  });
   if (busy) document.querySelectorAll("#view button").forEach((b) => (b.disabled = true));
   stats();
   tick();
 }
 
+/** Les montants du bandeau défilent jusqu'à leur nouvelle valeur. */
+function countTo(el, value) {
+  const from = Number(el.dataset.v ?? 0);
+  el.dataset.v = value;
+  const fmt = (n) => (Number.isInteger(value) ? Math.round(n) : n.toFixed(1));
+  if (from === value) return;
+  if (!motion) return void (el.textContent = fmt(value));
+  el.classList.remove("bump");
+  void el.offsetWidth;
+  el.classList.add("bump");
+  const t0 = performance.now();
+  const step = (t) => {
+    const k = Math.min(1, (t - t0) / 700);
+    el.textContent = fmt(from + (value - from) * (1 - (1 - k) ** 3));
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 function stats() {
   const sum = (st) => offers.reduce((t, o) => t + FOYERS.filter((f) => o.foyers[f].status === st).length * Number(o.primeXrp), 0);
-  const fmt = (n) => (Number.isInteger(n) ? n : n.toFixed(1));
-  $("#st-locked").textContent = fmt(sum("locked"));
-  $("#st-paid").textContent = fmt(sum("released"));
-  $("#st-refunded").textContent = fmt(sum("refunded"));
+  countTo($("#st-locked"), sum("locked"));
+  countTo($("#st-paid"), sum("released"));
+  countTo($("#st-refunded"), sum("refunded"));
 }
 
 function tick() {
+  const total = cfg?.cancelAfterSeconds || 180;
   document.querySelectorAll("[data-deadline]").forEach((el) => {
     const left = Math.round(Number(el.dataset.deadline) + RIPPLE_EPOCH - Date.now() / 1000) - 15;
     el.textContent = left > 0 ? `reste ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : "trop tard";
-    el.parentElement.classList.toggle("ko", left <= 30);
+    el.closest(".deadline").classList.toggle("ko", left <= 30);
+    setRing(el, left, total - 15);
   });
   document.querySelectorAll("[data-cancel-after]").forEach((el) => {
     const left = Math.round(Number(el.dataset.cancelAfter) + RIPPLE_EPOCH - Date.now() / 1000);
     el.textContent = left > 0 ? `possible dans ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : "échéance passée";
-    const btn = el.parentElement.querySelector("button");
+    setRing(el, left, total);
+    const btn = el.closest(".offer-foot").querySelector("button");
     if (btn && left <= -5 && !busy) btn.disabled = false;
   });
+}
+
+/** Numéro du dernier ledger validé, en direct depuis le Testnet (abonnement au flux « ledger »). */
+async function liveLedger() {
+  try {
+    const c = await ledger();
+    const show = (n) => {
+      $("#ledger-n").textContent = `#${n}`;
+      const el = $("#ledger");
+      el.classList.remove("tick");
+      void el.offsetWidth;
+      el.classList.add("tick");
+    };
+    c.on("ledgerClosed", (l) => show(l.ledger_index));
+    const r = await c.request({ command: "subscribe", streams: ["ledger"] });
+    show(r.result.ledger_index);
+  } catch {
+    $("#ledger").hidden = true;
+  }
 }
 
 async function refresh() {
   try {
     const [a, o] = await Promise.all([api("/accounts"), api("/offers")]);
+    const first = !cfg;
     cfg = a;
     offers = o;
+    if (first) liveLedger();
     $("#net").className = "net ok";
     $("#net-label").textContent = `Testnet · ${a.server.replace("wss://", "")}`;
     // ne pas casser un champ en cours de saisie
@@ -404,7 +484,32 @@ $("#view").addEventListener("input", (e) => {
   $(`#out-${s.dataset.hash}-${s.dataset.slider}`).textContent = `−${s.value} %`;
 });
 
-window.addEventListener("hashchange", render);
+// halo qui suit la souris, avec un léger retard
+(() => {
+  const g = $("#glow");
+  if (!g || matchMedia("(hover: none), (prefers-reduced-motion: reduce)").matches) return;
+  let x = innerWidth / 2, y = innerHeight / 2, gx = x, gy = y, raf = 0;
+  const band = $(".band");
+  const step = () => {
+    gx += (x - gx) * 0.18;
+    gy += (y - gy) * 0.18;
+    g.style.transform = `translate3d(${gx}px, ${gy}px, 0)`;
+    raf = Math.abs(x - gx) + Math.abs(y - gy) > 0.5 ? requestAnimationFrame(step) : 0;
+  };
+  addEventListener("pointermove", (e) => {
+    x = e.clientX;
+    y = e.clientY;
+    g.classList.add("on");
+    g.classList.toggle("dark", y < band.getBoundingClientRect().bottom);
+    if (!raf) raf = requestAnimationFrame(step);
+  }, { passive: true });
+  document.addEventListener("pointerleave", () => g.classList.remove("on"));
+})();
+
+window.addEventListener("hashchange", () => {
+  enter = true;
+  render();
+});
 setInterval(tick, 1000);
 setInterval(() => { if (!busy) refresh(); }, 4000);
 refresh();

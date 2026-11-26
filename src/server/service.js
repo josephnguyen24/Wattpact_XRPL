@@ -10,7 +10,7 @@ import { deriveCondition } from "../xrpl/conditions.js";
 import { publishOffer, acceptOffer, escrowCreateTx, measureTx } from "../xrpl/market.js";
 import { generateHistory, measureEvent } from "../offchain/simulator.js";
 import { computeBaseline, evaluate, releveHash } from "../offchain/verifier.js";
-import { FOYERS, OFFER_DEFAULTS, EXPLORER, SERVERS } from "../config.js";
+import { FOYERS, OFFER_DEFAULTS, EXPLORER, SERVERS, CANCEL_AFTER_SECONDS } from "../config.js";
 
 // État local : hashs, séquences, statuts. Pas de seed, pas de fulfillment.
 const STORE = fileURLToPath(new URL("../../data/app-state.json", import.meta.url));
@@ -72,7 +72,7 @@ export async function accounts() {
       out[role] = { address, balance };
     }),
   );
-  return { server: c.url, servers: SERVERS, explorer: EXPLORER, defaults: OFFER_DEFAULTS, accounts: out };
+  return { server: c.url, servers: SERVERS, explorer: EXPLORER, defaults: OFFER_DEFAULTS, cancelAfterSeconds: CANCEL_AFTER_SECONDS, accounts: out };
 }
 
 export async function listOffers() {
