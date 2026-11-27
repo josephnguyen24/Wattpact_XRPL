@@ -133,6 +133,7 @@ export const createOffer = (input = {}) =>
 export const lockAccepted = (hash) =>
   serial(async () => {
     const o = findOffer(hash);
+    if (o.status !== "open") throw new HttpError(409, "Mesure déjà faite : une prime bloquée maintenant ne pourrait plus être versée");
     const todo = foyersWith(o, "accepted");
     if (!todo.length) throw new HttpError(409, "Aucune acceptation en attente");
 
@@ -279,7 +280,8 @@ export const measure = (hash, reductions = {}) =>
     if (o.status !== "open") throw new HttpError(409, "Mesure déjà faite");
     const locked = foyersWith(o, "locked");
     if (!locked.length) throw new HttpError(409, "Aucune prime verrouillée");
-    if (foyersWith(o, "accepted").length) throw new HttpError(409, "Des acceptations attendent encore leur escrow");
+    // Un foyer qui a accepté sans que l'opérateur bloque sa prime ne bloque pas les autres :
+    // il reste « accepté » (acceptation signée on-chain, aucun escrow : défaut de l'opérateur, visible).
 
     const c = await getClient();
     // Après CancelAfter, XRPL refuse EscrowFinish (tecNO_PERMISSION) : on vérifie avant d'envoyer quoi que ce soit.

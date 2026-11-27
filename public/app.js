@@ -121,7 +121,7 @@ function viewOperator() {
     const missed = FOYERS.filter((f) => o.foyers[f].status === "locked" && (o.foyers[f].verdict === "missed" || o.foyers[f].cancellable));
     const locked = FOYERS.filter((f) => ["locked", "released", "refunded"].includes(o.foyers[f].status)).length;
     let foot = "";
-    if (accepted.length) {
+    if (accepted.length && o.status === "open") {
       foot = `<button class="btn main" data-act="lock" data-hash="${o.hash}">Bloquer ${accepted.length} prime${accepted.length > 1 ? "s" : ""}</button>
         <span class="muted small">${accepted.length * Number(o.primeXrp)} XRP mis sous séquestre</span>`;
     } else if (missed.length) {
@@ -177,7 +177,12 @@ function viewVerifier() {
   const list = offers.filter((o) => FOYERS.some((f) => o.foyers[f].status !== "invited")).map((o) => {
     const locked = FOYERS.filter((f) => o.foyers[f].status === "locked");
     if (o.status === "open") {
-      if (!locked.length) return `<article class="offer">${offerTop(o)}<div class="offer-foot muted small">En attente des escrows de l'opérateur.</div></article>`;
+      if (!locked.length) {
+        const n = FOYERS.filter((f) => o.foyers[f].status === "accepted").length;
+        return `<article class="offer">${offerTop(o)}<div class="offer-foot small">${chip("accepted")}
+          <span>${n} foyer${n > 1 ? "s ont" : " a"} accepté. Rien à mesurer tant que l'opérateur n'a pas bloqué les primes.</span>
+          <a class="btn sm" href="#operateur">Aller à l'opérateur →</a></div></article>`;
+      }
       const s = (sliders[o.hash] ||= { foyer1: 25, foyer2: 30, foyer3: 5 });
       const deadline = Math.min(...locked.map((f) => o.foyers[f].escrow.cancelAfter));
       if (locked.some((f) => o.foyers[f].cancellable)) {
@@ -192,7 +197,10 @@ function viewVerifier() {
             <input type="range" min="0" max="50" value="${s[f]}" style="--v:${s[f] * 2}%" data-slider="${f}" data-hash="${o.hash}">
             <span class="target"><span>0 %</span><span>objectif −${pct(o.targetReduction)}</span><span>−50 %</span></span></label>
         </div>`).join("")}</div>
-        <div class="offer-foot"><button class="btn main" data-act="measure" data-hash="${o.hash}">Publier les relevés</button>
+        ${FOYERS.some((f) => o.foyers[f].status === "accepted")
+          ? `<div class="offer-foot small">${chip("accepted")}<span>${FOYERS.filter((f) => o.foyers[f].status === "accepted").map((f) => NAME[f]).join(", ")} : accepté, prime pas encore bloquée. Si l'opérateur ne la bloque pas avant la mesure, il ne sera pas mesuré.</span>
+              <a class="btn sm" href="#operateur">Aller à l'opérateur →</a></div>` : ""}
+        <div class="offer-foot"><button class="btn main" data-act="measure" data-hash="${o.hash}">Publier les relevés (${locked.length} foyer${locked.length > 1 ? "s" : ""})</button>
           <span class="muted small">On-chain : l'empreinte de chaque relevé, pas la consommation.</span></div>
       </article>`;
     }
@@ -221,7 +229,9 @@ function viewFoyer(f) {
     if (v.status === "invited" && o.status === "open") action = `<button class="btn main" data-act="accept" data-hash="${o.hash}" data-foyer="${f}">Accepter</button>`;
     if (v.status !== "invited") action += `<button class="btn" data-act="verify" data-hash="${o.hash}" data-foyer="${f}">Vérifier sur le ledger</button>`;
     let info = "";
-    if (v.status === "accepted") info = "En attente de l'escrow de l'opérateur.";
+    if (v.status === "accepted") info = o.status === "open"
+      ? "En attente de l'escrow de l'opérateur."
+      : "Prime jamais bloquée par l'opérateur. Mon acceptation signée reste sur le ledger comme preuve.";
     if (v.status === "locked" && !v.verdict) info = `${o.primeXrp} XRP bloqués à ton nom.`;
     if (v.verdict) info = `Baisse mesurée : −${(v.reduction * 100).toFixed(1)} % (objectif −${pct(o.targetReduction)}).`;
     return `<article class="offer">${offerTop(o)}
