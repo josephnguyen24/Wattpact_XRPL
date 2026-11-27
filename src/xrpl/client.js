@@ -53,7 +53,7 @@ export async function submitBatch(client, wallet, txs) {
   const first = info.result.account_data.Sequence;
   const prepared = await Promise.all(txs.map((tx, i) => client.autofill({ ...tx, Sequence: first + i })));
   const signed = prepared.map((tx) => ({ tx, ...wallet.sign(tx) }));
-  return Promise.all(
+  const settled = await Promise.allSettled(
     signed.map(async (s, i) => {
       await sleep(i * 60); // garde l'ordre d'arrivée des Sequence
       const res = await client.submitAndWait(s.tx_blob);
@@ -62,6 +62,13 @@ export async function submitBatch(client, wallet, txs) {
       return { hash: s.hash, result: res.result, sequence: s.tx.Sequence };
     }),
   );
+  return settled.map((r) => (r.status === "fulfilled" ? r.value : { error: r.reason }));
+}
+
+/** Comme submitBatch, mais lève une erreur s'il y a eu un échec (après que l'appelant a pu enregistrer les succès). */
+export function firstError(results) {
+  const bad = results.find((r) => r.error);
+  if (bad) throw bad.error;
 }
 
 /**

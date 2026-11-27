@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import xrpl from "xrpl";
-import { connect, walletFor, submitBatch } from "../xrpl/client.js";
+import { connect, walletFor, submitBatch, firstError, fundWithRetry } from "../xrpl/client.js";
 import { deriveCondition } from "../xrpl/conditions.js";
 import { publishOffer, acceptOffer, escrowCreateTx, measureTx } from "../xrpl/market.js";
 import { generateHistory, measureEvent } from "../offchain/simulator.js";
@@ -75,6 +75,15 @@ export async function accounts() {
   return { server: c.url, servers: SERVERS, explorer: EXPLORER, defaults: OFFER_DEFAULTS, cancelAfterSeconds: CANCEL_AFTER_SECONDS, accounts: out };
 }
 
+/** Historique simulé du créneau de pointe (10 jours) et référence, par foyer : données hors chaîne. */
+export function histories() {
+  return Object.fromEntries(FOYERS.map((f) => {
+    const history = generateHistory(f);
+    const { baselineKwh, days } = computeBaseline(history);
+    return [f, { history, baselineKwh, baselineDays: days }];
+  }));
+}
+
 export async function listOffers() {
   const c = await getClient();
   const r = await c.request({ command: "ledger", ledger_index: "validated" });
@@ -129,17 +138,89 @@ export const lockAccepted = (hash) =>
 
     const c = await getClient();
     const operator = walletFor("operator");
+
+    // Solde disponible = solde - réserve (base + 1 incrément par objet possédé, dont chaque escrow créé)
+    const need = todo.length * Number(o.primeXrp);
+    const { available } = await spendable(c, operator.address, todo.length);
+    if (available < need + 0.01) {
+      throw new HttpError(409, `Solde opérateur insuffisant : ${available.toFixed(2)} XRP disponibles, ${need} XRP nécessaires. Récupérer les primes expirées ou recharger au faucet.`);
+    }
+
     const built = todo.map((f) => {
       const { condition } = deriveCondition(secret(), o.hash, o.foyers[f].address);
       return { f, condition, ...escrowCreateTx(operator.address, o.foyers[f].address, o.primeXrp, condition) };
     });
     const results = await submitBatch(c, operator, built.map((b) => b.tx));
+    // on enregistre chaque escrow créé, même si un autre de l'envoi a échoué
     built.forEach((b, i) => {
+      if (results[i].error) return;
       o.foyers[b.f].escrow = { sequence: results[i].sequence, condition: b.condition, cancelAfter: b.cancelAfter, createHash: results[i].hash };
       o.foyers[b.f].status = "locked";
     });
     save();
+    firstError(results);
     return o;
+  });
+
+/** XRP réellement dépensables par un compte, en tenant compte de la réserve du ledger. */
+async function spendable(c, address, newObjects = 0) {
+  const [info, state] = await Promise.all([
+    c.request({ command: "account_info", account: address, ledger_index: "validated" }),
+    c.request({ command: "server_state" }),
+  ]);
+  const v = state.result.state.validated_ledger;
+  const base = Number(v.reserve_base) / 1e6;
+  const inc = Number(v.reserve_inc) / 1e6;
+  const balance = Number(info.result.account_data.Balance) / 1e6;
+  const owned = info.result.account_data.OwnerCount + newObjects;
+  return { balance, available: balance - base - inc * owned };
+}
+
+/**
+ * Rembourse à l'opérateur TOUS ses escrows expirés, lus directement sur le ledger
+ * (y compris ceux que l'état local ne connaît pas). Met à jour les offres correspondantes.
+ */
+export const recoverExpired = () =>
+  serial(async () => {
+    const c = await getClient();
+    const operator = walletFor("operator");
+    const now = await ledgerTime(c);
+    const objs = (await c.request({ command: "account_objects", account: operator.address, type: "escrow", ledger_index: "validated" })).result.account_objects;
+    const expired = objs.filter((e) => e.CancelAfter && now > e.CancelAfter);
+    if (!expired.length) throw new HttpError(409, "Aucune prime expirée à récupérer");
+
+    // la Sequence de création se retrouve via la transaction qui a créé l'objet
+    const seqs = await Promise.all(expired.map(async (e) => {
+      const tx = await c.request({ command: "tx", transaction: e.PreviousTxnID });
+      return (tx.result.tx_json ?? tx.result).Sequence;
+    }));
+    const results = await submitBatch(c, operator, seqs.map((seq) => ({
+      TransactionType: "EscrowCancel", Account: operator.address, Owner: operator.address, OfferSequence: seq,
+    })));
+    let recovered = 0;
+    seqs.forEach((seq, i) => {
+      if (results[i].error) return;
+      recovered += Number(xrpl.dropsToXrp(expired[i].Amount));
+      for (const o of db.offers) {
+        for (const f of FOYERS) {
+          if (o.foyers[f].escrow?.sequence === seq && o.foyers[f].status === "locked") {
+            Object.assign(o.foyers[f], { status: "refunded", settleHash: results[i].hash });
+          }
+        }
+        if (o.status !== "closed" && FOYERS.every((f) => !["locked", "accepted"].includes(o.foyers[f].status)) && FOYERS.some((f) => o.foyers[f].status === "refunded")) o.status = "closed";
+      }
+    });
+    save();
+    firstError(results);
+    return { count: results.filter((r) => !r.error).length, recovered };
+  });
+
+/** Testnet uniquement : ré-alimente l'opérateur via le faucet. */
+export const topUpOperator = () =>
+  serial(async () => {
+    const c = await getClient();
+    const { balance } = await fundWithRetry(c, walletFor("operator"));
+    return { balance };
   });
 
 /**
@@ -160,9 +241,12 @@ export const settleOffer = (hash) =>
       operator,
       ready.map((f) => ({ TransactionType: "EscrowCancel", Account: operator.address, Owner: operator.address, OfferSequence: o.foyers[f].escrow.sequence })),
     );
-    ready.forEach((f, i) => Object.assign(o.foyers[f], { status: "refunded", settleHash: results[i].hash }));
+    ready.forEach((f, i) => {
+      if (!results[i].error) Object.assign(o.foyers[f], { status: "refunded", settleHash: results[i].hash });
+    });
     if (!foyersWith(o, "locked").length && !foyersWith(o, "accepted").length) o.status = "closed";
     save();
+    firstError(results);
     return o;
   });
 
@@ -235,12 +319,16 @@ export const measure = (hash, reductions = {}) =>
         };
       }),
     ]);
+    if (m.error) throw m.error; // relevés non publiés : rien n'est enregistré
     o.measureHash = m.hash;
     o.status = "measured";
     locked.forEach((f) => Object.assign(o.foyers[f], results[f]));
-    winners.forEach((f, i) => Object.assign(o.foyers[f], { status: "released", settleHash: released[i].hash }));
+    winners.forEach((f, i) => {
+      if (!released[i].error) Object.assign(o.foyers[f], { status: "released", settleHash: released[i].hash });
+    });
     if (!foyersWith(o, "locked").length) o.status = "closed";
     save();
+    firstError(released);
     return o;
   });
 

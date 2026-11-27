@@ -102,6 +102,7 @@ a { color: inherit; }
   box-shadow: 0 1px 0 #fff inset, 0 10px 30px -18px rgba(11, 16, 25, .25);
 }
 .card { padding: 18px 20px; }
+.stack { display: grid; gap: 16px; align-content: start; }
 .card h2 { margin: 0 0 14px; font: 700 15px var(--display); letter-spacing: -.01em; color: var(--ink); }
 .muted { color: var(--muted); }
 .small { font-size: 13px; }
@@ -261,6 +262,50 @@ input[type="range"]::-moz-range-thumb {
 /* entrée en cascade des cartes */
 .enter { animation: rise .5s cubic-bezier(.2, .8, .2, 1) both; }
 @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+/* graphiques de consommation */
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; padding: 6px 20px 16px; }
+.charts.one { grid-template-columns: minmax(0, 520px); }
+.chart-box { border: 1px solid var(--line); border-radius: 12px; padding: 10px 10px 4px; background: linear-gradient(180deg, #fbfcfd, #fff); }
+.chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 0 4px 4px; font-size: 13px; }
+.chart-head output, .chart-head .mono { font: 500 14px var(--mono); }
+.chart { width: 100%; height: auto; display: block; overflow: visible; cursor: crosshair; }
+.chart .grid { stroke: #eef1f5; stroke-width: 1; }
+.chart .ax { font: 9px var(--mono); fill: #8b93a3; }
+.chart .j-l { fill: var(--ink); font-weight: 500; }
+.chart .zone { fill: rgba(122, 208, 0, .08); }
+.chart .thr { stroke: #7ad000; stroke-width: 1.2; }
+.chart .base { stroke: #9aa3b2; stroke-width: 1.2; stroke-dasharray: 4 4; }
+.chart .lbl { font: 9px var(--mono); fill: #687185; paint-order: stroke; stroke: #fff; stroke-width: 3px; stroke-linejoin: round; }
+.chart .thr-l { fill: var(--volt-deep); }
+.chart .ln { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .pt { fill: var(--ink); stroke: #fff; stroke-width: 2; }
+.chart .we { fill: #fff; stroke: #b5bdc9; stroke-width: 1.6; }
+.chart .to-j { stroke: #9aa3b2; stroke-width: 1.5; stroke-dasharray: 2 3; fill: none; }
+.chart .j { stroke: #fff; stroke-width: 2; transition: cy .25s cubic-bezier(.2, .8, .2, 1); }
+.chart .j.ok { fill: #7ad000; filter: drop-shadow(0 0 4px var(--volt)) drop-shadow(0 0 10px var(--volt-glow)); }
+.chart .j.ko { fill: var(--red); filter: drop-shadow(0 0 4px #f0483e99); }
+.chart .j.pred { animation: pulse 1.6s ease-in-out infinite; }
+.chart .cross { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 2 2; opacity: 0; }
+.chart.hover .cross { opacity: .5; }
+.chart .hit { fill: transparent; }
+.slider { display: grid; gap: 0; padding: 0 6px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.tip {
+  position: fixed; z-index: 40; pointer-events: none; transform: translate(-50%, -100%); opacity: 0; transition: opacity .12s;
+  background: var(--ink); color: #fff; font: 12px var(--mono); padding: 6px 10px; border-radius: 8px; white-space: nowrap;
+  box-shadow: 0 0 0 1px #ffffff14, 0 8px 20px -6px rgba(11, 16, 25, .5);
+}
+.tip.on { opacity: 1; }
+
+/* éclair de paiement */
+.bolt-fx { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 50; overflow: visible; }
+.bolt-fx path { fill: none; stroke-linejoin: round; stroke-linecap: round; stroke-dasharray: 100; stroke-dashoffset: 100; animation: strike 1s ease-out forwards; }
+.bolt-fx .glow-p { stroke: var(--volt); stroke-width: 7; opacity: .5; filter: blur(4px); }
+.bolt-fx .core { stroke: #fff; stroke-width: 2; filter: drop-shadow(0 0 3px var(--volt)) drop-shadow(0 0 8px var(--volt)); }
+.bolt-fx .hit-c { fill: #fff; opacity: 0; filter: drop-shadow(0 0 10px var(--volt)); animation: hit 1s ease-out forwards; }
+@keyframes strike { 0% { stroke-dashoffset: 100; opacity: 1; } 35% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
+@keyframes hit { 0%, 30% { opacity: 0; r: 4; } 40% { opacity: 1; r: 10; } 100% { opacity: 0; r: 28; } }
 
 /* halo qui suit la souris */
 .glow {

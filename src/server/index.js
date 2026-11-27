@@ -23,11 +23,14 @@ const wrap = (fn) => async (req, res) => {
 
 app.get("/api/accounts", wrap(() => svc.accounts()));
 app.get("/api/offers", wrap(() => svc.listOffers()));
+app.get("/api/history", wrap(() => svc.histories()));
 app.post("/api/offers", wrap((req) => svc.createOffer(req.body)));                                  // opérateur
 app.post("/api/offers/:hash/lock", wrap((req) => svc.lockAccepted(req.params.hash)));               // opérateur
 app.post("/api/offers/:hash/settle", wrap((req) => svc.settleOffer(req.params.hash)));             // opérateur
 app.post("/api/offers/:hash/accept", wrap((req) => svc.accept(req.params.hash, [].concat(req.body?.foyer ?? [])))); // foyer(s)
 app.post("/api/offers/:hash/measure", wrap((req) => svc.measure(req.params.hash, req.body?.reductions)));         // vérificateur
+app.post("/api/operator/recover", wrap(() => svc.recoverExpired()));                                 // opérateur
+app.post("/api/operator/topup", wrap(() => svc.topUpOperator()));                                    // Testnet
 app.post("/api/reset", wrap(() => (svc.resetLocal(), { ok: true })));
 
 const PORT = Number(process.env.PORT || 3000);

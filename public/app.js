@@ -143,7 +143,7 @@ function viewOperator() {
 
   return `<div class="head"><div><h1>Opérateur</h1><p>Finance les primes. Ne décide pas qui est payé.</p></div>${balance("operator")}</div>
   <div class="grid">
-    <div class="card"><h2>Nouvelle offre</h2>
+    <div class="stack"><div class="card"><h2>Nouvelle offre</h2>
       <form id="offer-form">
         <label>Jour <input name="day" type="date" required min="${isoDay(0)}" value="${draft.day}"></label>
         <div class="row2">
@@ -162,6 +162,13 @@ function viewOperator() {
         <button class="btn main" type="submit">Publier</button>
       </form>
     </div>
+    <div class="card"><h2>Trésorerie</h2>
+      <p class="small muted" style="margin:0 0 10px">Après l'échéance, une prime non versée ne peut plus que revenir à l'opérateur.</p>
+      <div class="presets">
+        <button class="btn sm" data-act="recover">Récupérer les primes expirées</button>
+        <button class="btn sm" data-act="topup">Recharger au faucet</button>
+      </div>
+    </div></div>
     <div>${list || `<div class="empty">Pas encore d'offre.</div>`}</div>
   </div>`;
 }
@@ -179,19 +186,25 @@ function viewVerifier() {
       return `<article class="offer">${offerTop(o)}
         <div class="offer-foot small"><span class="muted">Relevés simulés : baisse réelle de chaque foyer sur le créneau.</span>
           <span class="deadline">${ring(`<span>à publier avant ${hhmm(rippleDate(deadline))} · <span data-deadline="${deadline}"></span></span>`)}</span></div>
-        <div class="sliders">${locked.map((f) => `<label>${NAME[f]} <output id="out-${o.hash}-${f}">−${s[f]} %</output>
-          <input type="range" min="0" max="50" value="${s[f]}" style="--v:${s[f] * 2}%" data-slider="${f}" data-hash="${o.hash}">
-          <span class="target"><span>0 %</span><span>objectif −${pct(o.targetReduction)}</span><span>−50 %</span></span></label>`).join("")}</div>
+        <div class="charts">${locked.map((f) => `<div>
+          ${chartBlock(o, f, predicted(f, s[f] / 100), false, `<output id="out-${o.hash}-${f}">−${s[f]} %</output>`)}
+          <label class="slider"><span class="sr">Baisse de ${NAME[f]}</span>
+            <input type="range" min="0" max="50" value="${s[f]}" style="--v:${s[f] * 2}%" data-slider="${f}" data-hash="${o.hash}">
+            <span class="target"><span>0 %</span><span>objectif −${pct(o.targetReduction)}</span><span>−50 %</span></span></label>
+        </div>`).join("")}</div>
         <div class="offer-foot"><button class="btn main" data-act="measure" data-hash="${o.hash}">Publier les relevés</button>
           <span class="muted small">On-chain : l'empreinte de chaque relevé, pas la consommation.</span></div>
       </article>`;
     }
+    const measuredF = FOYERS.filter((f) => o.foyers[f].verdict);
     return `<article class="offer">${offerTop(o, txLink(o.measureHash, "relevés"))}
+      <div class="charts">${measuredF.map((f) => chartBlock(o, f, o.foyers[f].measuredKwh, true,
+        `<span class="mono ${o.foyers[f].verdict === "reached" ? "ok" : "ko"}">−${(o.foyers[f].reduction * 100).toFixed(1)} %</span>`)).join("")}</div>
       <table><thead><tr><th>Foyer</th><th>Référence</th><th>Mesuré</th><th>Baisse</th><th></th></tr></thead><tbody>
-      ${FOYERS.filter((f) => o.foyers[f].verdict).map((f) => {
+      ${measuredF.map((f) => {
         const v = o.foyers[f];
         const ok = v.verdict === "reached";
-        return `<tr><td>${NAME[f]}</td><td class="mono">${v.baselineKwh} kWh</td><td class="mono">${v.measuredKwh} kWh</td>
+        return `<tr data-key="${o.hash}:${f}" data-status="${v.status}"><td>${NAME[f]}</td><td class="mono">${v.baselineKwh} kWh</td><td class="mono">${v.measuredKwh} kWh</td>
           <td class="mono ${ok ? "ok" : "ko"}">−${(v.reduction * 100).toFixed(1)} %</td>
           <td>${ok ? `${txLink(v.settleHash, "libérée")}` : `<span class="muted small">non atteint</span>`}</td></tr>`;
       }).join("")}</tbody></table></article>`;
@@ -213,6 +226,8 @@ function viewFoyer(f) {
     if (v.verdict) info = `Baisse mesurée : −${(v.reduction * 100).toFixed(1)} % (objectif −${pct(o.targetReduction)}).`;
     return `<article class="offer">${offerTop(o)}
       <div class="offer-foot" data-key="${o.hash}:${f}" data-status="${v.status}">${chip(v.status)}<span class="small">${info}</span>${pipe(v.status)}</div>
+      ${v.status !== "invited" ? `<div class="charts one">${chartBlock(o, f, v.verdict ? v.measuredKwh : undefined, true,
+        v.verdict ? "" : `<span class="muted small">ma conso sur le créneau, 10 derniers jours</span>`)}</div>` : ""}
       ${proofs[`${o.hash}:${f}`] || ""}
       <div class="offer-foot">${action}${txLink(v.acceptHash, "mon acceptation")}${txLink(v.settleHash, v.status === "refunded" ? "remboursement" : "paiement")}</div>
     </article>`;
@@ -222,6 +237,67 @@ function viewFoyer(f) {
     ${list || `<div class="empty">Aucune offre reçue.</div>`}
     ${anyInvited ? `<p><button class="btn link" data-act="accept-all">démo : faire accepter les 3 foyers d'un coup</button></p>` : ""}`;
 }
+
+// ---------- graphique de consommation d'un foyer (créneau de pointe, 10 jours + jour J) ----------
+
+let hist = null; // { foyer1: { history, baselineKwh }, ... } : données simulées, hors chaîne
+const CW = 340, CH = 176, PL = 36, PR = 12, PT = 14, PB = 26;
+
+/**
+ * kwhJ : conso du jour J (mesurée, ou estimée pendant qu'on règle le curseur).
+ * measured : true si c'est la vraie mesure publiée.
+ */
+function chart(f, targetReduction, kwhJ, measured) {
+  const h = hist?.[f];
+  if (!h) return "";
+  const days = h.history;
+  const base = h.baselineKwh;
+  const threshold = base * (1 - targetReduction);
+  const vals = [...days.map((d) => d.kwh), base, threshold, kwhJ ?? base];
+  const lo = Math.min(...vals) * 0.85, hi = Math.max(...vals) * 1.06;
+  const n = days.length + 1;
+  const x = (i) => PL + (i * (CW - PL - PR)) / (n - 1);
+  const y = (v) => PT + (1 - (v - lo) / (hi - lo)) * (CH - PT - PB);
+  const pts = days.map((d, i) => [x(i), y(d.kwh)]);
+  const line = pts.map(([a, b], i) => `${i ? "L" : "M"}${a.toFixed(1)} ${b.toFixed(1)}`).join(" ");
+  const area = `${line} L${pts.at(-1)[0].toFixed(1)} ${CH - PB} L${PL} ${CH - PB} Z`;
+  const ticks = [lo + (hi - lo) * 0.15, (lo + hi) / 2, hi - (hi - lo) * 0.15];
+  const reached = kwhJ !== undefined && kwhJ <= threshold;
+  const jx = x(n - 1), jy = kwhJ === undefined ? null : y(kwhJ);
+  const dm = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+  const tipData = days.map((d) => ({ x: x(days.indexOf(d)), y: y(d.kwh), t: `${new Date(`${d.date}T12:00`).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })} · ${d.kwh.toFixed(3)} kWh${d.weekday === 0 || d.weekday === 6 ? " · week-end, hors référence" : ""}` }));
+  if (jy !== null) tipData.push({ x: jx, y: jy, t: `jour J · ${measured ? "" : "≈ "}${kwhJ.toFixed(3)} kWh · ${reached ? "objectif atteint" : "objectif manqué"}` });
+
+  return `<svg class="chart" viewBox="0 0 ${CW} ${CH}" role="img" aria-label="Consommation de ${NAME[f]} sur le créneau de pointe, 10 derniers jours et jour J"
+      data-tips='${esc(JSON.stringify(tipData))}'>
+    <defs><linearGradient id="g-${f}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7ad000" stop-opacity=".22"/><stop offset="1" stop-color="#7ad000" stop-opacity="0"/></linearGradient></defs>
+    ${ticks.map((t) => `<line class="grid" x1="${PL}" x2="${CW - PR}" y1="${y(t)}" y2="${y(t)}"/><text class="ax" x="${PL - 6}" y="${y(t) + 3}" text-anchor="end">${t.toFixed(1)}</text>`).join("")}
+    <rect class="zone" x="${PL}" y="${y(threshold)}" width="${CW - PL - PR}" height="${CH - PB - y(threshold)}"/>
+    <line class="thr" x1="${PL}" x2="${CW - PR}" y1="${y(threshold)}" y2="${y(threshold)}"/>
+    <text class="lbl thr-l" x="${PL + 4}" y="${y(threshold) + 12}">objectif −${pct(targetReduction)}</text>
+    <line class="base" x1="${PL}" x2="${CW - PR}" y1="${y(base)}" y2="${y(base)}"/>
+    <path class="area" d="${area}" fill="url(#g-${f})"/>
+    <path class="ln" d="${line}"/>
+    <text class="lbl" x="${CW - PR - 4}" y="${y(base) - 5}" text-anchor="end">référence ${base.toFixed(2)}</text>
+    ${pts.map(([a, b], i) => `<circle class="${days[i].weekday === 0 || days[i].weekday === 6 ? "we" : "pt"}" cx="${a}" cy="${b}" r="3.5"/>`).join("")}
+    ${jy !== null ? `<path class="to-j" d="M${pts.at(-1)[0]} ${pts.at(-1)[1]} L${jx} ${jy}"/>
+      <circle class="j ${reached ? "ok" : "ko"} ${measured ? "" : "pred"}" cx="${jx}" cy="${jy}" r="5.5"/>` : ""}
+    ${days.map((d, i) => (i % 2 === 0 ? `<text class="ax" x="${x(i)}" y="${CH - 8}" text-anchor="middle">${dm(d.date)}</text>` : "")).join("")}
+    <text class="ax j-l" x="${jx}" y="${CH - 8}" text-anchor="middle">J</text>
+    <line class="cross" x1="0" x2="0" y1="${PT}" y2="${CH - PB}"/>
+    <rect class="hit" x="${PL}" y="0" width="${CW - PL - PR}" height="${CH}"/>
+  </svg>`;
+}
+
+/** Bloc graphique + légende compacte (une seule série : le titre la nomme). */
+function chartBlock(o, f, kwhJ, measured, extra = "") {
+  return `<div class="chart-box" data-chart="${o.hash}:${f}">
+    <div class="chart-head"><b>${NAME[f]}</b>${extra}</div>
+    ${chart(f, o.targetReduction, kwhJ, measured)}
+  </div>`;
+}
+
+const predicted = (f, r) => (hist?.[f] ? hist[f].baselineKwh * (1 - r) : undefined);
 
 function balance(r) {
   const b = cfg.accounts[r]?.balance;
@@ -328,14 +404,48 @@ function render() {
     });
   }
   enter = false;
-  view.querySelectorAll("[data-key]").forEach((el) => {
-    const prev = seen.get(el.dataset.key);
-    if (prev && prev !== el.dataset.status && motion) el.classList.add("flash", `flash-${el.dataset.status}`);
-    seen.set(el.dataset.key, el.dataset.status);
-  });
+  // changements de statut détectés sur les données (pas sur ce qui était affiché avant)
+  const strikes = [];
+  for (const o of offers) {
+    for (const f of FOYERS) {
+      const key = `${o.hash}:${f}`;
+      const now = o.foyers[f].status;
+      const prev = seen.get(key);
+      seen.set(key, now);
+      if (!prev || prev === now || !motion) continue;
+      const el = view.querySelector(`[data-key="${key}"]`);
+      if (!el) continue;
+      el.classList.add("flash", `flash-${now}`);
+      if (now === "released") strikes.push(el);
+    }
+  }
   if (busy) document.querySelectorAll("#view button").forEach((b) => (b.disabled = true));
   stats();
   tick();
+  strikes.forEach((el, i) => setTimeout(() => bolt(el), i * 180));
+}
+
+/** Éclair du compteur « sous séquestre » vers la ligne du foyer payé. */
+function bolt(target) {
+  const a = $("#st-locked").getBoundingClientRect();
+  const t = (target.querySelector(".chip") || target).getBoundingClientRect();
+  if (!t.width) return;
+  const x1 = a.left + a.width / 2, y1 = a.top + a.height / 2;
+  const x2 = t.left + t.width / 2, y2 = t.top + t.height / 2;
+  const segs = 9;
+  let d = `M${x1} ${y1}`;
+  for (let i = 1; i < segs; i++) {
+    const k = i / segs;
+    const nx = -(y2 - y1), ny = x2 - x1, len = Math.hypot(nx, ny) || 1;
+    const off = (Math.random() - 0.5) * 70 * Math.sin(Math.PI * k);
+    d += ` L${x1 + (x2 - x1) * k + (nx / len) * off} ${y1 + (y2 - y1) * k + (ny / len) * off}`;
+  }
+  d += ` L${x2} ${y2}`;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "bolt-fx");
+  svg.innerHTML = `<path class="glow-p" d="${d}" pathLength="100"/><path class="core" d="${d}" pathLength="100"/><circle class="hit-c" cx="${x2}" cy="${y2}" r="4"/>`;
+  document.body.appendChild(svg);
+  setTimeout(() => svg.remove(), 1100);
 }
 
 /** Les montants du bandeau défilent jusqu'à leur nouvelle valeur. */
@@ -406,11 +516,15 @@ async function refresh() {
     const first = !cfg;
     cfg = a;
     offers = o;
-    if (first) liveLedger();
+    if (first) {
+      liveLedger();
+      hist = await api("/history").catch(() => null);
+    }
     $("#net").className = "net ok";
     $("#net-label").textContent = `Testnet · ${a.server.replace("wss://", "")}`;
     // ne pas casser un champ en cours de saisie
-    if (!document.activeElement?.closest?.("form")) render();
+    const editing = document.activeElement?.closest?.("form") || document.activeElement?.type === "range";
+    if (!editing && !document.querySelector("svg.chart.hover")) render();
   } catch (e) {
     $("#net").className = "net ko";
     $("#net-label").textContent = e.message;
@@ -455,6 +569,13 @@ $("#view").addEventListener("click", async (e) => {
     const o = offers.find((x) => x.status === "open" && FOYERS.some((f) => x.foyers[f].status === "invited"));
     run(b, "Signatures…", () => api(`/offers/${o.hash}/accept`, { foyer: FOYERS }), "3 foyers ont accepté");
   }
+  if (act === "recover") {
+    run(b, "Lecture du ledger…", async () => {
+      const r = await api("/operator/recover", {});
+      toast(`${r.count} escrow${r.count > 1 ? "s" : ""} remboursé${r.count > 1 ? "s" : ""} : ${r.recovered} XRP récupérés`);
+    });
+  }
+  if (act === "topup") run(b, "Faucet…", () => api("/operator/topup", {}), "Opérateur rechargé");
   if (act === "lock") run(b, "Envoi des escrows…", () => api(`/offers/${hash}/lock`, {}), "Primes bloquées");
   if (act === "measure") {
     const red = Object.fromEntries(Object.entries(sliders[hash]).map(([k, v]) => [k, v / 100]));
@@ -482,6 +603,39 @@ $("#view").addEventListener("input", (e) => {
   sliders[s.dataset.hash][s.dataset.slider] = Number(s.value);
   s.style.setProperty("--v", `${s.value * 2}%`);
   $(`#out-${s.dataset.hash}-${s.dataset.slider}`).textContent = `−${s.value} %`;
+  // le point du jour J suit le curseur
+  const o = offers.find((x) => x.hash === s.dataset.hash);
+  const box = document.querySelector(`[data-chart="${s.dataset.hash}:${s.dataset.slider}"] svg`);
+  if (o && box) box.outerHTML = chart(s.dataset.slider, o.targetReduction, predicted(s.dataset.slider, s.value / 100), false);
+});
+
+// réticule + infobulle au survol d'un graphique
+const tip = document.createElement("div");
+tip.className = "tip";
+document.body.appendChild(tip);
+$("#view").addEventListener("pointermove", (e) => {
+  const svg = e.target.closest?.("svg.chart");
+  if (!svg) return void tip.classList.remove("on");
+  const pts = JSON.parse(svg.dataset.tips);
+  const r = svg.getBoundingClientRect();
+  const vx = ((e.clientX - r.left) / r.width) * CW;
+  const p = pts.reduce((a, b) => (Math.abs(b.x - vx) < Math.abs(a.x - vx) ? b : a));
+  const cross = svg.querySelector(".cross");
+  cross.setAttribute("x1", p.x);
+  cross.setAttribute("x2", p.x);
+  svg.classList.add("hover");
+  tip.textContent = p.t;
+  tip.style.left = `${r.left + (p.x / CW) * r.width}px`;
+  tip.style.top = `${r.top + (p.y / CH) * r.height - 12}px`;
+  tip.classList.add("on");
+});
+$("#view").addEventListener("pointerleave", () => tip.classList.remove("on"), true);
+$("#view").addEventListener("pointerout", (e) => {
+  const svg = e.target.closest?.("svg.chart");
+  if (svg && !svg.contains(e.relatedTarget)) {
+    svg.classList.remove("hover");
+    tip.classList.remove("on");
+  }
 });
 
 // halo qui suit la souris, avec un léger retard
